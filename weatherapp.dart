@@ -7,6 +7,10 @@ void main() {
   runApp(const WeatherApp());
 }
 
+// ------------------------------------------------------------
+// MAIN APP
+// ------------------------------------------------------------
+
 class WeatherApp extends StatelessWidget {
   const WeatherApp({super.key});
 
@@ -24,6 +28,10 @@ class WeatherApp extends StatelessWidget {
   }
 }
 
+// ------------------------------------------------------------
+// HOME PAGE
+// ------------------------------------------------------------
+
 class WeatherHomePage extends StatefulWidget {
   const WeatherHomePage({super.key});
 
@@ -32,9 +40,11 @@ class WeatherHomePage extends StatefulWidget {
 }
 
 class _WeatherHomePageState extends State<WeatherHomePage> {
+  // Text controller for city search
   final TextEditingController cityController =
       TextEditingController(text: 'Chennai');
 
+  // Weather information
   String cityName = 'Chennai';
   String country = 'India';
 
@@ -48,104 +58,175 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
   bool isLoading = false;
   String? errorMessage;
 
+  // ------------------------------------------------------------
+  // INITIALIZATION
+  // ------------------------------------------------------------
+
   @override
   void initState() {
     super.initState();
 
+    // Load weather after the screen is displayed
     WidgetsBinding.instance.addPostFrameCallback((_) {
       searchWeather();
     });
   }
 
   // ------------------------------------------------------------
-  // SEARCH CITY
+  // SEARCH WEATHER
   // ------------------------------------------------------------
 
   Future<void> searchWeather() async {
     final city = cityController.text.trim();
 
+    // Check empty city
     if (city.isEmpty) {
       setState(() {
-        errorMessage = 'Please enter a city name';
+        errorMessage = 'Please enter a city name.';
       });
       return;
     }
 
+    // Show loading
     setState(() {
       isLoading = true;
       errorMessage = null;
     });
 
     try {
-      // First find the city's latitude and longitude.
-      final geocodingUrl = Uri.parse(
-        'https://geocoding-api.open-meteo.com/v1/search'
-        '?name=${Uri.encodeComponent(city)}'
-        '&count=1'
-        '&language=en'
-        '&format=json',
+      // --------------------------------------------------------
+      // STEP 1: FIND CITY COORDINATES
+      // --------------------------------------------------------
+
+      final geocodingUrl = Uri.https(
+        'geocoding-api.open-meteo.com',
+        '/v1/search',
+        {
+          'name': city,
+          'count': '1',
+          'language': 'en',
+          'format': 'json',
+        },
       );
 
-      final geoResponse = await http.get(geocodingUrl);
+      final geoResponse = await http
+          .get(geocodingUrl)
+          .timeout(const Duration(seconds: 10));
 
       if (geoResponse.statusCode != 200) {
-        throw Exception('Unable to find location');
+        throw Exception('Location service error');
       }
 
-      final geoData = jsonDecode(geoResponse.body);
+      final dynamic geoData = jsonDecode(geoResponse.body);
 
-      if (geoData['results'] == null ||
-          (geoData['results'] as List).isEmpty) {
+      if (geoData is! Map<String, dynamic>) {
+        throw Exception('Invalid location response');
+      }
+
+      final results = geoData['results'];
+
+      if (results == null ||
+          results is! List ||
+          results.isEmpty) {
         throw Exception('City not found');
       }
 
-      final result = geoData['results'][0];
+      final firstResult = results.first;
 
-      final double latitude =
-          (result['latitude'] as num).toDouble();
-
-      final double longitude =
-          (result['longitude'] as num).toDouble();
-
-      final String foundCity =
-          result['name'] ?? city;
-
-      final String foundCountry =
-          result['country'] ?? '';
-
-      // ----------------------------------------------------------
-      // GET WEATHER
-      // ----------------------------------------------------------
-
-      final weatherUrl = Uri.parse(
-        'https://api.open-meteo.com/v1/forecast'
-        '?latitude=$latitude'
-        '&longitude=$longitude'
-        '&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m'
-        '&timezone=auto',
-      );
-
-      final weatherResponse = await http.get(weatherUrl);
-
-      if (weatherResponse.statusCode != 200) {
-        throw Exception('Unable to get weather');
+      if (firstResult is! Map<String, dynamic>) {
+        throw Exception('Invalid city information');
       }
 
-      final weatherData = jsonDecode(weatherResponse.body);
+      // Get latitude
+      final latitudeValue = firstResult['latitude'];
+
+      // Get longitude
+      final longitudeValue = firstResult['longitude'];
+
+      if (latitudeValue is! num || longitudeValue is! num) {
+        throw Exception('Coordinates not available');
+      }
+
+      final double latitude = latitudeValue.toDouble();
+      final double longitude = longitudeValue.toDouble();
+
+      // Get city name
+      final String foundCity =
+          firstResult['name']?.toString() ?? city;
+
+      // Get country
+      final String foundCountry =
+          firstResult['country']?.toString() ?? '';
+
+      // --------------------------------------------------------
+      // STEP 2: GET WEATHER
+      // --------------------------------------------------------
+
+      final weatherUrl = Uri.https(
+        'api.open-meteo.com',
+        '/v1/forecast',
+        {
+          'latitude': latitude.toString(),
+          'longitude': longitude.toString(),
+          'current':
+              'temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m',
+          'timezone': 'auto',
+        },
+      );
+
+      final weatherResponse = await http
+          .get(weatherUrl)
+          .timeout(const Duration(seconds: 10));
+
+      if (weatherResponse.statusCode != 200) {
+        throw Exception('Weather service error');
+      }
+
+      final dynamic weatherData = jsonDecode(weatherResponse.body);
+
+      if (weatherData is! Map<String, dynamic>) {
+        throw Exception('Invalid weather response');
+      }
 
       final current = weatherData['current'];
 
+      if (current is! Map<String, dynamic>) {
+        throw Exception('Current weather not available');
+      }
+
+      // --------------------------------------------------------
+      // GET WEATHER VALUES
+      // --------------------------------------------------------
+
+      final temperatureValue = current['temperature_2m'];
+      final humidityValue = current['relative_humidity_2m'];
+      final windValue = current['wind_speed_10m'];
+      final weatherCodeValue = current['weather_code'];
+
+      if (temperatureValue is! num ||
+          humidityValue is! num ||
+          windValue is! num ||
+          weatherCodeValue is! num) {
+        throw Exception('Weather information is incomplete');
+      }
+
       final double currentTemperature =
-          (current['temperature_2m'] as num).toDouble();
+          temperatureValue.toDouble();
 
       final double currentHumidity =
-          (current['relative_humidity_2m'] as num).toDouble();
+          humidityValue.toDouble();
 
       final double currentWind =
-          (current['wind_speed_10m'] as num).toDouble();
+          windValue.toDouble();
 
       final int weatherCode =
-          (current['weather_code'] as num).toInt();
+          weatherCodeValue.toInt();
+
+      // --------------------------------------------------------
+      // UPDATE SCREEN
+      // --------------------------------------------------------
+
+      if (!mounted) return;
 
       setState(() {
         cityName = foundCity;
@@ -158,15 +239,21 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
         weatherDescription =
             getWeatherDescription(weatherCode);
 
-        weatherIcon = getWeatherIcon(weatherCode);
+        weatherIcon =
+            getWeatherIcon(weatherCode);
 
         isLoading = false;
+        errorMessage = null;
       });
     } catch (e) {
+      if (!mounted) return;
+
       setState(() {
         isLoading = false;
         errorMessage =
-            'Unable to find weather. Check the city name and try again.';
+            'Unable to get weather.\n'
+            'Please check your internet connection '
+            'and city name.';
       });
     }
   }
@@ -176,39 +263,54 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
   // ------------------------------------------------------------
 
   String getWeatherDescription(int code) {
-    if (code == 0) {
-      return 'Clear Sky';
-    }
+    switch (code) {
+      case 0:
+        return 'Clear Sky';
 
-    if (code == 1 || code == 2 || code == 3) {
-      return 'Partly Cloudy';
-    }
+      case 1:
+      case 2:
+        return 'Partly Cloudy';
 
-    if (code == 45 || code == 48) {
-      return 'Foggy';
-    }
+      case 3:
+        return 'Overcast';
 
-    if (code >= 51 && code <= 57) {
-      return 'Drizzle';
-    }
+      case 45:
+      case 48:
+        return 'Foggy';
 
-    if (code >= 61 && code <= 67) {
-      return 'Rain';
-    }
+      case 51:
+      case 53:
+      case 55:
+      case 56:
+      case 57:
+        return 'Drizzle';
 
-    if (code >= 71 && code <= 77) {
-      return 'Snow';
-    }
+      case 61:
+      case 63:
+      case 65:
+      case 66:
+      case 67:
+        return 'Rain';
 
-    if (code >= 80 && code <= 82) {
-      return 'Rain Showers';
-    }
+      case 71:
+      case 73:
+      case 75:
+      case 77:
+        return 'Snow';
 
-    if (code >= 95 && code <= 99) {
-      return 'Thunderstorm';
-    }
+      case 80:
+      case 81:
+      case 82:
+        return 'Rain Showers';
 
-    return 'Unknown';
+      case 95:
+      case 96:
+      case 99:
+        return 'Thunderstorm';
+
+      default:
+        return 'Unknown Weather';
+    }
   }
 
   // ------------------------------------------------------------
@@ -216,53 +318,68 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
   // ------------------------------------------------------------
 
   String getWeatherIcon(int code) {
-    if (code == 0) {
-      return '☀️';
-    }
+    switch (code) {
+      case 0:
+        return '☀️';
 
-    if (code == 1 || code == 2) {
-      return '🌤️';
-    }
+      case 1:
+        return '🌤️';
 
-    if (code == 3) {
-      return '☁️';
-    }
+      case 2:
+        return '⛅';
 
-    if (code == 45 || code == 48) {
-      return '🌫️';
-    }
+      case 3:
+        return '☁️';
 
-    if (code >= 51 && code <= 57) {
-      return '🌦️';
-    }
+      case 45:
+      case 48:
+        return '🌫️';
 
-    if (code >= 61 && code <= 67) {
-      return '🌧️';
-    }
+      case 51:
+      case 53:
+      case 55:
+      case 56:
+      case 57:
+        return '🌦️';
 
-    if (code >= 71 && code <= 77) {
-      return '❄️';
-    }
+      case 61:
+      case 63:
+      case 65:
+      case 66:
+      case 67:
+        return '🌧️';
 
-    if (code >= 80 && code <= 82) {
-      return '🌧️';
-    }
+      case 71:
+      case 73:
+      case 75:
+      case 77:
+        return '❄️';
 
-    if (code >= 95 && code <= 99) {
-      return '⛈️';
-    }
+      case 80:
+      case 81:
+      case 82:
+        return '🌧️';
 
-    return '🌤️';
+      case 95:
+      case 96:
+      case 99:
+        return '⛈️';
+
+      default:
+        return '🌤️';
+    }
   }
 
   // ------------------------------------------------------------
-  // UI
+  // BUILD UI
   // ------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: Container(
+        width: double.infinity,
+        height: double.infinity,
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
@@ -275,133 +392,137 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
         ),
         child: SafeArea(
           child: SingleChildScrollView(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                children: [
-                  const SizedBox(height: 20),
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              children: [
+                const SizedBox(height: 20),
 
-                  // ------------------------------------------------
-                  // TITLE
-                  // ------------------------------------------------
+                // ------------------------------------------------
+                // TITLE
+                // ------------------------------------------------
 
-                  const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.cloud,
+                const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.cloud,
+                      color: Colors.white,
+                      size: 35,
+                    ),
+                    SizedBox(width: 10),
+                    Text(
+                      'Weather App',
+                      style: TextStyle(
                         color: Colors.white,
-                        size: 35,
+                        fontSize: 30,
+                        fontWeight: FontWeight.bold,
                       ),
-                      SizedBox(width: 10),
-                      Text(
-                        'Weather App',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 30,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
+                ),
 
-                  const SizedBox(height: 30),
+                const SizedBox(height: 30),
 
-                  // ------------------------------------------------
-                  // SEARCH BOX
-                  // ------------------------------------------------
+                // ------------------------------------------------
+                // SEARCH BOX
+                // ------------------------------------------------
 
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: cityController,
-                          style: const TextStyle(
-                            color: Colors.white,
-                          ),
-                          textInputAction: TextInputAction.search,
-                          onSubmitted: (_) {
-                            searchWeather();
-                          },
-                          decoration: InputDecoration(
-                            hintText: 'Enter city name',
-                            hintStyle: const TextStyle(
-                              color: Colors.white70,
-                            ),
-                            prefixIcon: const Icon(
-                              Icons.search,
-                              color: Colors.white,
-                            ),
-                            filled: true,
-                            fillColor: Colors.white24,
-                            border: OutlineInputBorder(
-                              borderRadius:
-                                  BorderRadius.circular(18),
-                              borderSide: BorderSide.none,
-                            ),
-                          ),
-                        ),
-                      ),
-
-                      const SizedBox(width: 10),
-
-                      Container(
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(18),
-                        ),
-                        child: IconButton(
-                          onPressed: searchWeather,
-                          icon: const Icon(
-                            Icons.search,
-                            color: Color(0xFF1565C0),
-                          ),
-                          iconSize: 30,
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 45),
-
-                  // ------------------------------------------------
-                  // ERROR
-                  // ------------------------------------------------
-
-                  if (errorMessage != null)
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(15),
-                      margin: const EdgeInsets.only(bottom: 20),
-                      decoration: BoxDecoration(
-                        color: Colors.red.withOpacity(0.25),
-                        borderRadius: BorderRadius.circular(15),
-                      ),
-                      child: Text(
-                        errorMessage!,
-                        textAlign: TextAlign.center,
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: cityController,
                         style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 15,
+                        ),
+                        textInputAction:
+                            TextInputAction.search,
+                        onSubmitted: (_) {
+                          searchWeather();
+                        },
+                        decoration: InputDecoration(
+                          hintText: 'Enter city name',
+                          hintStyle: const TextStyle(
+                            color: Colors.white70,
+                          ),
+                          prefixIcon: const Icon(
+                            Icons.search,
+                            color: Colors.white,
+                          ),
+                          filled: true,
+                          fillColor: Colors.white24,
+                          border: OutlineInputBorder(
+                            borderRadius:
+                                BorderRadius.circular(18),
+                            borderSide: BorderSide.none,
+                          ),
                         ),
                       ),
                     ),
 
-                  // ------------------------------------------------
-                  // LOADING
-                  // ------------------------------------------------
+                    const SizedBox(width: 10),
 
-                  if (isLoading)
-                    const Padding(
-                      padding: EdgeInsets.all(40),
-                      child: CircularProgressIndicator(
+                    // Search button
+                    Container(
+                      decoration: BoxDecoration(
                         color: Colors.white,
+                        borderRadius:
+                            BorderRadius.circular(18),
                       ),
-                    )
-                  else
-                    buildWeatherContent(),
-                ],
-              ),
+                      child: IconButton(
+                        onPressed:
+                            isLoading ? null : searchWeather,
+                        icon: const Icon(
+                          Icons.search,
+                          color: Color(0xFF1565C0),
+                        ),
+                        iconSize: 30,
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 40),
+
+                // ------------------------------------------------
+                // ERROR MESSAGE
+                // ------------------------------------------------
+
+                if (errorMessage != null)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(15),
+                    margin:
+                        const EdgeInsets.only(bottom: 20),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withOpacity(0.25),
+                      borderRadius:
+                          BorderRadius.circular(15),
+                    ),
+                    child: Text(
+                      errorMessage!,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ),
+
+                // ------------------------------------------------
+                // LOADING
+                // ------------------------------------------------
+
+                if (isLoading)
+                  const Padding(
+                    padding: EdgeInsets.all(40),
+                    child: CircularProgressIndicator(
+                      color: Colors.white,
+                    ),
+                  )
+                else
+                  buildWeatherContent(),
+              ],
             ),
           ),
         ),
@@ -418,7 +539,8 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
       children: [
         // Location
         Row(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisAlignment:
+              MainAxisAlignment.center,
           children: [
             const Icon(
               Icons.location_on,
@@ -426,12 +548,15 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
               size: 25,
             ),
             const SizedBox(width: 5),
-            Text(
-              cityName,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 28,
-                fontWeight: FontWeight.bold,
+            Flexible(
+              child: Text(
+                cityName,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 28,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
           ],
@@ -449,11 +574,11 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
 
         const SizedBox(height: 25),
 
-        // Weather Icon
+        // Weather icon
         Text(
           weatherIcon,
           style: const TextStyle(
-            fontSize: 100,
+            fontSize: 90,
           ),
         ),
 
@@ -474,6 +599,7 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
         // Description
         Text(
           weatherDescription,
+          textAlign: TextAlign.center,
           style: const TextStyle(
             color: Colors.white,
             fontSize: 22,
@@ -483,7 +609,10 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
 
         const SizedBox(height: 40),
 
-        // Information Cards
+        // --------------------------------------------------------
+        // INFORMATION CARDS
+        // --------------------------------------------------------
+
         Row(
           children: [
             Expanded(
@@ -512,12 +641,16 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
 
         const SizedBox(height: 25),
 
-        // Refresh Button
+        // --------------------------------------------------------
+        // REFRESH BUTTON
+        // --------------------------------------------------------
+
         SizedBox(
           width: double.infinity,
           height: 55,
           child: ElevatedButton.icon(
-            onPressed: searchWeather,
+            onPressed:
+                isLoading ? null : searchWeather,
             icon: const Icon(Icons.refresh),
             label: const Text(
               'Refresh Weather',
@@ -528,9 +661,11 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
             ),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.white,
-              foregroundColor: const Color(0xFF1565C0),
+              foregroundColor:
+                  const Color(0xFF1565C0),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(18),
+                borderRadius:
+                    BorderRadius.circular(18),
               ),
             ),
           ),
@@ -592,6 +727,7 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
 
           Text(
             value,
+            textAlign: TextAlign.center,
             style: const TextStyle(
               color: Colors.white,
               fontSize: 18,
@@ -602,6 +738,10 @@ class _WeatherHomePageState extends State<WeatherHomePage> {
       ),
     );
   }
+
+  // ------------------------------------------------------------
+  // DISPOSE
+  // ------------------------------------------------------------
 
   @override
   void dispose() {
